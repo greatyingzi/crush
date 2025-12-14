@@ -229,24 +229,47 @@ func (p *Playbook) Normalize() {
 	if p.KeyPoints == nil {
 		p.KeyPoints = []KeyPoint{}
 	}
-	for i := range p.KeyPoints {
-		p.KeyPoints[i].Text = strings.TrimSpace(p.KeyPoints[i].Text)
-		p.KeyPoints[i].Name = strings.TrimSpace(p.KeyPoints[i].Name)
-		p.KeyPoints[i].Tags = normalizeTags(p.KeyPoints[i].Tags)
 
-		if p.KeyPoints[i].EffectRating == nil {
-			v := inferEffectRatingFromScore(p.KeyPoints[i].Score)
-			p.KeyPoints[i].EffectRating = &v
-		}
-		if p.KeyPoints[i].RiskLevel == nil {
-			v := inferRiskFromText(p.KeyPoints[i].Text)
-			p.KeyPoints[i].RiskLevel = &v
-		}
-		if p.KeyPoints[i].InnovationLevel == nil {
-			v := inferInnovationFromText(p.KeyPoints[i].Text)
-			p.KeyPoints[i].InnovationLevel = &v
+	existingNames := make(map[string]struct{})
+	for _, kp := range p.KeyPoints {
+		if n := strings.TrimSpace(kp.Name); n != "" {
+			existingNames[n] = struct{}{}
 		}
 	}
+
+	out := p.KeyPoints[:0]
+	for _, kp := range p.KeyPoints {
+		kp.Text = strings.TrimSpace(kp.Text)
+		if kp.Text == "" {
+			continue
+		}
+		kp.Name = strings.TrimSpace(kp.Name)
+		if kp.Name == "" {
+			kp.Name = generateKeyPointName(existingNames)
+			existingNames[kp.Name] = struct{}{}
+		}
+
+		kp.Tags = normalizeTags(kp.Tags)
+		if len(kp.Tags) == 0 {
+			kp.Tags = inferTagsFromText(kp.Text, 6)
+		}
+
+		if kp.EffectRating == nil {
+			v := inferEffectRatingFromScore(kp.Score)
+			kp.EffectRating = &v
+		}
+		if kp.RiskLevel == nil {
+			v := inferRiskFromText(kp.Text)
+			kp.RiskLevel = &v
+		}
+		if kp.InnovationLevel == nil {
+			v := inferInnovationFromText(kp.Text)
+			kp.InnovationLevel = &v
+		}
+
+		out = append(out, kp)
+	}
+	p.KeyPoints = out
 }
 
 func (p *Playbook) Sort() {

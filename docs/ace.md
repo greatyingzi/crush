@@ -9,6 +9,7 @@ This fork includes an optional, native ACE-style “project memory” injector.
 - On exit (optional), summarizes the latest session and updates the playbook using a multi-step pipeline (extract → score → merge → cleanup).
 
 In this fork, ACE memory injection is enabled by default; disable it explicitly if you don’t want it.
+Playbook updates are enabled by default for session end, compact, and exit; disable them explicitly if you don’t want them.
 
 ## Enable it
 
@@ -20,6 +21,8 @@ Add to your `crush.json`:
     "ace": {
       "enabled": true,
       "update_on_exit": true,
+      "update_on_session_end": true,
+      "update_on_precompact": true,
       "max_items": 6,
       "min_score": 0,
       "max_chars": 2000,
@@ -34,7 +37,12 @@ Add to your `crush.json`:
 ```json
 {
   "options": {
-    "ace": { "enabled": false }
+    "ace": {
+      "enabled": false,
+      "update_on_exit": false,
+      "update_on_session_end": false,
+      "update_on_precompact": false
+    }
   }
 }
 ```

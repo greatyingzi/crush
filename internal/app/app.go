@@ -52,11 +52,11 @@ type App struct {
 
 	config *config.Config
 
-	serviceEventsWG   *sync.WaitGroup
-	eventsCtx         context.Context
-	events            chan tea.Msg
-	tuiWG             *sync.WaitGroup
-	shutdownObservers []ShutdownObserver
+	serviceEventsWG *sync.WaitGroup
+	eventsCtx       context.Context
+	events          chan tea.Msg
+	tuiWG           *sync.WaitGroup
+	observers       []LifecycleObserver
 
 	// global context and cleanup functions
 	globalCtx    context.Context
@@ -124,7 +124,7 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 			model = app.AgentCoordinator.Model().Model
 		}
 	}
-	app.RegisterShutdownObserver(ace.NewSessionEndObserver(cfg, sessions, messages, app.AgentCoordinator, model))
+	app.RegisterObserver(ace.NewObserver(cfg, sessions, messages, app.AgentCoordinator, model))
 	return app, nil
 }
 

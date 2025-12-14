@@ -235,7 +235,11 @@ type ACEOptions struct {
 	// Optional playbook path. If relative, it is resolved relative to `options.data_directory`.
 	PlaybookPath string `json:"playbook_path,omitempty" jsonschema:"description=Path to the ACE playbook file (relative to data_directory unless absolute),example=ace/playbook.json"`
 	// UpdateOnExit runs a session-end update when Crush exits.
-	UpdateOnExit bool `json:"update_on_exit,omitempty" jsonschema:"description=Update ACE playbook from the latest session when Crush exits,default=false"`
+	UpdateOnExit *bool `json:"update_on_exit,omitempty" jsonschema:"description=Update ACE playbook from the latest session when Crush exits,default=true"`
+	// UpdateOnSessionEnd updates the playbook when a session is ended (e.g. session switch/clear).
+	UpdateOnSessionEnd *bool `json:"update_on_session_end,omitempty" jsonschema:"description=Update ACE playbook when a session ends (switch/clear),default=true"`
+	// UpdateOnPreCompact updates the playbook before compaction/summarization.
+	UpdateOnPreCompact *bool `json:"update_on_precompact,omitempty" jsonschema:"description=Update ACE playbook before compact/summarize,default=true"`
 	// MaxItems limits how many memories get injected.
 	MaxItems int `json:"max_items,omitempty" jsonschema:"description=Maximum number of memories to inject,minimum=0,maximum=50,default=6,example=6"`
 	// MinScore filters out low-value memories (based on the playbook entry score).

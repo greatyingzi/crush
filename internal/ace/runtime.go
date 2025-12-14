@@ -2,6 +2,7 @@ package ace
 
 import (
 	"context"
+	"log/slog"
 	"path/filepath"
 	"strings"
 
@@ -52,8 +53,18 @@ func (r *Runtime) Prefix(_ context.Context, basePrefix, sessionID, prompt, worki
 	path := PlaybookPath(r.cfg)
 	pb, err := r.store.Load(path)
 	if err != nil {
+		slog.Debug("ACE prefix: playbook load failed", "path", path, "error", err)
 		return basePrefix, nil
 	}
+	slog.Debug(
+		"ACE prefix: start",
+		"playbook_path", path,
+		"key_points", len(pb.KeyPoints),
+		"max_items", aceCfg.MaxItems,
+		"min_score", aceCfg.MinScore,
+		"max_chars", aceCfg.MaxChars,
+		"prompt_chars", len(prompt),
+	)
 
 	selected := r.selector.Select(pb, prompt, SelectOptions{
 		MaxItems: aceCfg.MaxItems,
@@ -65,8 +76,10 @@ func (r *Runtime) Prefix(_ context.Context, basePrefix, sessionID, prompt, worki
 	}
 	memory := strings.TrimSpace(r.formatter.Format(selected))
 	if memory == "" {
+		slog.Debug("ACE prefix: no memory selected", "selected", len(selected))
 		return basePrefix, nil
 	}
+	slog.Debug("ACE prefix: injected", "selected", len(selected), "memory_chars", len(memory))
 	if strings.TrimSpace(basePrefix) == "" {
 		return memory, nil
 	}

@@ -15,7 +15,7 @@ type Summarizer interface {
 	Summarize(ctx context.Context, sessionID string) error
 }
 
-type SessionEndObserver struct {
+type Observer struct {
 	cfg       *config.Config
 	sessions  session.Service
 	messages  message.Service
@@ -24,24 +24,22 @@ type SessionEndObserver struct {
 	store     Store
 }
 
-func NewSessionEndObserver(cfg *config.Config, sessions session.Service, messages message.Service, summarizer Summarizer, model fantasy.LanguageModel) *SessionEndObserver {
-	return &SessionEndObserver{
-		cfg:       cfg,
-		sessions:  sessions,
-		messages:  messages,
-		summarize: summarizer,
-		model:     model,
-		store:     NewFileStore(),
+func NewObserver(cfg *config.Config, sessions session.Service, messages message.Service, summarizer Summarizer, model fantasy.LanguageModel) *Observer {
+	return &Observer{
+		cfg:             cfg,
+		sessions:        sessions,
+		messages:        messages,
+		summarize:       summarizer,
+		model:           model,
+		store:           NewFileStore(),
 	}
 }
 
-func (o *SessionEndObserver) OnShutdown(ctx context.Context) {
-	if o.cfg == nil || o.cfg.Options == nil || o.cfg.Options.ACE == nil {
+func (o *Observer) OnShutdown(ctx context.Context) {
+	if !o.enabled() || !boolVal(o.cfg.Options.ACE.UpdateOnExit) {
 		return
 	}
-	if !o.cfg.Options.ACE.Enabled || !o.cfg.Options.ACE.UpdateOnExit {
-		return
-	}
+
 	shutdownCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
 
@@ -51,44 +49,142 @@ func (o *SessionEndObserver) OnShutdown(ctx context.Context) {
 	}
 	sess := sessions[0]
 
+	o.runUpdate(shutdownCtx, sess.ID, sess.Title, "exit", true)
+}
+
+func (o *Observer) OnSessionEnd(ctx context.Context, sessionID, reason string) {
+	if !o.enabled() || !boolVal(o.cfg.Options.ACE.UpdateOnSessionEnd) {
+		return
+	}
+
+	endCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
+	defer cancel()
+
+	sess, err := o.sessions.Get(endCtx, sessionID)
+	if err != nil {
+		return
+	}
+
+	o.runUpdate(endCtx, sessionID, sess.Title, reason, true)
+}
+
+func (o *Observer) OnPreCompact(ctx context.Context, sessionID string) {
+	if !o.enabled() || !boolVal(o.cfg.Options.ACE.UpdateOnPreCompact) {
+		return
+	}
+
+	preCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
+	defer cancel()
+
+	sess, err := o.sessions.Get(preCtx, sessionID)
+	if err != nil {
+		return
+	}
+	o.runUpdate(preCtx, sessionID, sess.Title, "precompact", true)
+}
+
+func (o *Observer) enabled() bool {
+	return o.cfg != nil && o.cfg.Options != nil && o.cfg.Options.ACE != nil && o.cfg.Options.ACE.Enabled
+}
+
+func boolVal(v *bool) bool {
+	if v == nil {
+		return false
+	}
+	return *v
+}
+
+func (o *Observer) runUpdate(ctx context.Context, sessionID, sessionTitle, reason string, allowSummarizeFallback bool) {
 	playbookPath := PlaybookPath(o.cfg)
+
+	msgs, err := o.messages.List(ctx, sessionID)
+	if err != nil || len(msgs) == 0 {
+		slog.Debug("ACE update skipped: no messages", "session_id", sessionID, "reason", reason, "error", err)
+		return
+	}
+
+	pbBefore, _ := o.store.Load(playbookPath)
+	beforeTotal := len(pbBefore.KeyPoints)
+	beforePending := countPending(pbBefore.KeyPoints)
 
 	// Preferred: LLM extraction + evaluation from the session transcript.
 	if o.model != nil {
-		msgs, err := o.messages.List(shutdownCtx, sess.ID)
-		if err == nil && len(msgs) > 0 {
-			gen := NewFantasyTextGenerator(o.model)
-			changed, updateErr := UpdateFromSessionMessages(shutdownCtx, o.store, playbookPath, sess.Title, msgs, gen)
-			if updateErr == nil && changed {
-				return
+		gen := NewFantasyTextGenerator(o.model)
+		changed, updateErr := UpdateFromSessionMessages(ctx, o.store, playbookPath, sessionTitle, msgs, gen)
+		if updateErr == nil {
+			if changed {
+				pbAfter, _ := o.store.Load(playbookPath)
+				slog.Info(
+					"ACE playbook updated (LLM)",
+					"session_id", sessionID,
+					"reason", reason,
+					"messages", len(msgs),
+					"playbook_path", playbookPath,
+					"before_total", beforeTotal,
+					"after_total", len(pbAfter.KeyPoints),
+					"before_pending", beforePending,
+					"after_pending", countPending(pbAfter.KeyPoints),
+				)
+			} else {
+				slog.Debug("ACE update: no changes (LLM)", "session_id", sessionID, "reason", reason, "messages", len(msgs))
 			}
-			if updateErr != nil {
-				slog.Debug("ACE session-end LLM update failed", "error", updateErr)
-			}
+			return
 		}
+		slog.Debug("ACE update failed (LLM)", "reason", reason, "error", updateErr)
 	}
 
-	// Fallback: use Crush summarization (if available) + heuristic extraction.
-	if o.summarize == nil {
+	// Optional fallback: use Crush summarization + heuristic extraction.
+	if !allowSummarizeFallback || o.summarize == nil {
 		return
 	}
-	if err := o.summarize.Summarize(shutdownCtx, sess.ID); err != nil {
-		slog.Debug("ACE session-end summarize failed", "error", err)
+	slog.Debug("ACE update: running summarize fallback", "session_id", sessionID, "reason", reason)
+	if err := o.summarize.Summarize(ctx, sessionID); err != nil {
+		slog.Debug("ACE summarize fallback failed", "reason", reason, "error", err)
 		return
 	}
-	updatedSession, err := o.sessions.Get(shutdownCtx, sess.ID)
+	updatedSession, err := o.sessions.Get(ctx, sessionID)
 	if err != nil || updatedSession.SummaryMessageID == "" {
+		slog.Debug("ACE summarize fallback missing summary", "session_id", sessionID, "reason", reason, "error", err)
 		return
 	}
-	summaryMsg, err := o.messages.Get(shutdownCtx, updatedSession.SummaryMessageID)
+	summaryMsg, err := o.messages.Get(ctx, updatedSession.SummaryMessageID)
 	if err != nil {
+		slog.Debug("ACE summarize fallback: summary message load failed", "session_id", sessionID, "reason", reason, "error", err)
 		return
 	}
 	summaryText := summaryMsg.Content().Text
 	if summaryText == "" {
+		slog.Debug("ACE summarize fallback: empty summary", "session_id", sessionID, "reason", reason)
 		return
 	}
-	if _, err := UpdateFromSessionSummary(o.store, playbookPath, updatedSession.Title, summaryText); err != nil {
-		slog.Debug("ACE session-end update failed", "error", err)
+	changed, err := UpdateFromSessionSummary(o.store, playbookPath, updatedSession.Title, summaryText)
+	if err != nil {
+		slog.Debug("ACE update failed (summary fallback)", "reason", reason, "error", err)
+		return
 	}
+	if changed {
+		pbAfter, _ := o.store.Load(playbookPath)
+		slog.Info(
+			"ACE playbook updated (summary fallback)",
+			"session_id", sessionID,
+			"reason", reason,
+			"playbook_path", playbookPath,
+			"before_total", beforeTotal,
+			"after_total", len(pbAfter.KeyPoints),
+			"before_pending", beforePending,
+			"after_pending", countPending(pbAfter.KeyPoints),
+		)
+	} else {
+		slog.Debug("ACE update: no changes (summary fallback)", "session_id", sessionID, "reason", reason)
+	}
+}
+
+func countPending(kps []KeyPoint) int {
+	n := 0
+	for _, kp := range kps {
+		if kp.Pending {
+			n++
+		}
+	}
+	return n
 }

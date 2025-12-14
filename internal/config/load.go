@@ -327,6 +327,9 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 			Enabled: true,
 		}
 	}
+	assignIfNil(&c.Options.ACE.UpdateOnSessionEnd, true)
+	assignIfNil(&c.Options.ACE.UpdateOnPreCompact, true)
+	assignIfNil(&c.Options.ACE.UpdateOnExit, true)
 	if c.Options.ACE.MaxItems == 0 {
 		c.Options.ACE.MaxItems = 6
 	}

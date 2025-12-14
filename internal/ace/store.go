@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -73,7 +74,8 @@ func (s *FileStore) SaveAtomic(path string, pb Playbook) error {
 		return err
 	}
 
-	bts, err := json.MarshalIndent(pb, "", "  ")
+	payload := serializePlaybookForSave(pb)
+	bts, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -105,4 +107,74 @@ func (s *FileStore) SaveAtomic(path string, pb Playbook) error {
 	}
 
 	return nil
+}
+
+func serializePlaybookForSave(pb Playbook) map[string]any {
+	existing := make([]any, 0, len(pb.KeyPoints))
+	pending := make([]any, 0, 8)
+
+	for _, kp := range pb.KeyPoints {
+		if kp.Pending {
+			pending = append(pending, serializeKeyPointForSave(kp, true))
+			continue
+		}
+		existing = append(existing, serializeKeyPointForSave(kp, false))
+	}
+
+	keyPoints := existing
+	if len(pending) > 0 {
+		keyPoints = append(keyPoints,
+			map[string]any{
+				"divider": true,
+				"text":    "--- pending key points below ---",
+			},
+		)
+		keyPoints = append(keyPoints, pending...)
+	}
+
+	return map[string]any{
+		"version":      pb.Version,
+		"last_updated": pb.LastUpdated,
+		"key_points":   keyPoints,
+	}
+}
+
+func serializeKeyPointForSave(kp KeyPoint, forcePending bool) map[string]any {
+	text := strings.TrimSpace(kp.Text)
+	name := strings.TrimSpace(kp.Name)
+	tags := normalizeTags(kp.Tags)
+	if len(tags) == 0 && text != "" {
+		tags = inferTagsFromText(text, 6)
+	}
+
+	out := map[string]any{
+		"name":  name,
+		"text":  text,
+		"tags":  tags,
+		"score": kp.Score,
+	}
+
+	if kp.Pending || forcePending {
+		out["pending"] = true
+	}
+
+	// Phase 2 emergency fix: validate multi-dimensional fields.
+	effect := 0.5
+	if kp.EffectRating != nil && 0 <= *kp.EffectRating && *kp.EffectRating <= 1 {
+		effect = *kp.EffectRating
+	}
+	risk := -0.5
+	if kp.RiskLevel != nil && -1 <= *kp.RiskLevel && *kp.RiskLevel <= 1 {
+		risk = *kp.RiskLevel
+	}
+	innovation := 0.5
+	if kp.InnovationLevel != nil && 0 <= *kp.InnovationLevel && *kp.InnovationLevel <= 1 {
+		innovation = *kp.InnovationLevel
+	}
+
+	out["effect_rating"] = effect
+	out["risk_level"] = risk
+	out["innovation_level"] = innovation
+
+	return out
 }
