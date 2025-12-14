@@ -246,6 +246,15 @@ type ACEOptions struct {
 	MinScore int `json:"min_score,omitempty" jsonschema:"description=Minimum key point score to consider for injection,default=0,example=0"`
 	// MaxChars limits the size of the injected memory block to avoid ballooning the prompt.
 	MaxChars int `json:"max_chars,omitempty" jsonschema:"description=Maximum characters allowed for injected memory block,minimum=0,maximum=20000,default=2000,example=2000"`
+	// Advanced options for intelligent selection
+	Temperature float64 `json:"temperature,omitempty" jsonschema:"description=Default temperature for knowledge injection (0.0-1.0),minimum=0,maximum=1,default=0.5,example=0.5"`
+	ContextProtection *bool `json:"context_protection,omitempty" jsonschema:"description=Enable context continuity protection to prevent attention fragmentation,default=true"`
+	TaskGuidance *bool `json:"task_guidance,omitempty" jsonschema:"description=Enable structured task guidance and agent coordination,default=true"`
+	MaxKeyPoints int `json:"max_key_points,omitempty" jsonschema:"description=Maximum number of key points to store in playbook,minimum=10,maximum=1000,default=250,example=250"`
+	// Temperature mode presets
+	ConservativeMode *bool `json:"conservative_mode,omitempty" jsonschema:"description=Use conservative temperature preset (prioritize proven solutions),default=false"`
+	BalancedMode *bool `json:"balanced_mode,omitempty" jsonschema:"description=Use balanced temperature preset (equal exploration/exploitation),default=true"`
+	ExploratoryMode *bool `json:"exploratory_mode,omitempty" jsonschema:"description=Use exploratory temperature preset (prioritize new ideas),default=false"`
 }
 
 type MCPs map[string]MCPConfig
