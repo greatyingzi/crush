@@ -14,6 +14,7 @@ type Runtime struct {
 	store     Store
 	selector  Selector
 	formatter Formatter
+	analyzer  *TaskGuidanceAnalyzer
 }
 
 func NewRuntime(cfg *config.Config) *Runtime {
@@ -22,6 +23,7 @@ func NewRuntime(cfg *config.Config) *Runtime {
 		store:     NewFileStore(),
 		selector:  NewDefaultSelector(),
 		formatter: NewDefaultFormatter(),
+		analyzer:  NewTaskGuidanceAnalyzer(0.5),
 	}
 }
 
@@ -40,7 +42,12 @@ func (r *Runtime) WithFormatter(formatter Formatter) *Runtime {
 	return r
 }
 
-func (r *Runtime) Prefix(_ context.Context, basePrefix, sessionID, prompt, workingDir, model, provider string) (string, error) {
+func (r *Runtime) WithAnalyzer(analyzer *TaskGuidanceAnalyzer) *Runtime {
+	r.analyzer = analyzer
+	return r
+}
+
+func (r *Runtime) Prefix(ctx context.Context, basePrefix, sessionID, prompt, workingDir, model, provider string) (string, error) {
 	_ = sessionID
 	_ = workingDir
 	_ = model
@@ -66,20 +73,38 @@ func (r *Runtime) Prefix(_ context.Context, basePrefix, sessionID, prompt, worki
 		"prompt_chars", len(prompt),
 	)
 
-	selected := r.selector.Select(pb, prompt, SelectOptions{
-		MaxItems: aceCfg.MaxItems,
-		MinScore: aceCfg.MinScore,
-		MaxChars: aceCfg.MaxChars,
-	})
+	// Determine optimal temperature based on task characteristics
+	optimalTemp := DetermineOptimalTemperature(prompt)
+	
+	// Use intelligent selector with temperature-driven selection
+	intelligentSelector := NewIntelligentSelector(optimalTemp)
+	
+	// Extract tags from playbook for intelligent selection
+	existingTags := make([]string, 0)
+	for _, kp := range pb.KeyPoints {
+		existingTags = append(existingTags, kp.Tags...)
+	}
+	existingTags = normalizeTags(existingTags)
+
+	selected := intelligentSelector.Select(pb, existingTags, aceCfg.MaxItems)
 	if aceCfg.MaxChars > 0 {
 		selected = r.formatter.TrimToMaxChars(selected, aceCfg.MaxChars)
 	}
+	
+	// Format selected memory
 	memory := strings.TrimSpace(r.formatter.Format(selected))
 	if memory == "" {
 		slog.Debug("ACE prefix: no memory selected", "selected", len(selected))
 		return basePrefix, nil
 	}
-	slog.Debug("ACE prefix: injected", "selected", len(selected), "memory_chars", len(memory))
+	
+	slog.Debug(
+		"ACE prefix: injected", 
+		"selected", len(selected), 
+		"memory_chars", len(memory),
+		"temperature", optimalTemp,
+	)
+	
 	if strings.TrimSpace(basePrefix) == "" {
 		return memory, nil
 	}
