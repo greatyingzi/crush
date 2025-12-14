@@ -17,6 +17,7 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
+	"github.com/charmbracelet/crush/internal/ace"
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/config"
@@ -65,6 +66,9 @@ type coordinator struct {
 
 	currentAgent SessionAgent
 	agents       map[string]SessionAgent
+
+	largeModel Model
+	smallModel Model
 
 	readyWg errgroup.Group
 }
@@ -304,6 +308,8 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 	if err != nil {
 		return nil, err
 	}
+	c.largeModel = large
+	c.smallModel = small
 
 	systemPrompt, err := prompt.Build(ctx, large.Model.Provider(), large.Model.Model(), *c.cfg)
 	if err != nil {
@@ -315,6 +321,8 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		large,
 		small,
 		largeProviderCfg.SystemPromptPrefix,
+		ace.NewRuntime(c.cfg),
+		c.cfg.WorkingDir(),
 		systemPrompt,
 		c.cfg.Options.DisableAutoSummarize,
 		c.permissions.SkipRequests(),
@@ -332,6 +340,10 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 	})
 
 	return result, nil
+}
+
+func (c *coordinator) SmallLanguageModel() fantasy.LanguageModel {
+	return c.smallModel.Model
 }
 
 func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fantasy.AgentTool, error) {

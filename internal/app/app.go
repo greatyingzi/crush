@@ -16,6 +16,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/fantasy"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/crush/internal/ace"
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
@@ -51,10 +52,11 @@ type App struct {
 
 	config *config.Config
 
-	serviceEventsWG *sync.WaitGroup
-	eventsCtx       context.Context
-	events          chan tea.Msg
-	tuiWG           *sync.WaitGroup
+	serviceEventsWG   *sync.WaitGroup
+	eventsCtx         context.Context
+	events            chan tea.Msg
+	tuiWG             *sync.WaitGroup
+	shutdownObservers []ShutdownObserver
 
 	// global context and cleanup functions
 	globalCtx    context.Context
@@ -113,6 +115,16 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 	if err := app.InitCoderAgent(ctx); err != nil {
 		return nil, fmt.Errorf("failed to initialize coder agent: %w", err)
 	}
+
+	var model fantasy.LanguageModel
+	if app.AgentCoordinator != nil {
+		if sm, ok := app.AgentCoordinator.(interface{ SmallLanguageModel() fantasy.LanguageModel }); ok {
+			model = sm.SmallLanguageModel()
+		} else {
+			model = app.AgentCoordinator.Model().Model
+		}
+	}
+	app.RegisterShutdownObserver(ace.NewSessionEndObserver(cfg, sessions, messages, app.AgentCoordinator, model))
 	return app, nil
 }
 
@@ -375,6 +387,8 @@ func (app *App) Subscribe(program *tea.Program) {
 func (app *App) Shutdown() {
 	start := time.Now()
 	defer func() { slog.Info("Shutdown took " + time.Since(start).String()) }()
+	app.notifyShutdownObservers(app.globalCtx)
+
 	var wg sync.WaitGroup
 	if app.AgentCoordinator != nil {
 		wg.Go(func() {

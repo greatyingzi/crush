@@ -51,3 +51,10 @@ manpages/
 completions/
 !internal/tui/components/completions/
 .prettierignore
+
+# Local Go caches (used by this fork's workflow)
+.go-cache/
+.go-mod-cache/
+
+# Local symlink to original ACE repo (fork workspace helper)
+agentic_context_engineering

@@ -173,6 +173,8 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 				LargeModel:           small, // Use small model for both (fetch doesn't need large)
 				SmallModel:           small,
 				SystemPromptPrefix:   smallProviderCfg.SystemPromptPrefix,
+				SystemPromptPrefixer: nil,
+				WorkingDir:           tmpDir,
 				SystemPrompt:         systemPrompt,
 				DisableAutoSummarize: c.cfg.Options.DisableAutoSummarize,
 				IsYolo:               c.permissions.SkipRequests(),

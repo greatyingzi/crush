@@ -70,6 +70,12 @@ type SessionAgent interface {
 	Model() Model
 }
 
+type SystemPromptPrefixer interface {
+	// Prefix returns an additional system prompt prefix to inject for a call.
+	// Return value should be the final prefix; returning empty means "use basePrefix".
+	Prefix(ctx context.Context, basePrefix, sessionID, prompt, workingDir, model, provider string) (string, error)
+}
+
 type Model struct {
 	Model      fantasy.LanguageModel
 	CatwalkCfg catwalk.Model
@@ -80,6 +86,8 @@ type sessionAgent struct {
 	largeModel           Model
 	smallModel           Model
 	systemPromptPrefix   string
+	systemPromptPrefixer SystemPromptPrefixer
+	workingDir           string
 	systemPrompt         string
 	tools                []fantasy.AgentTool
 	sessions             session.Service
@@ -95,6 +103,8 @@ type SessionAgentOptions struct {
 	LargeModel           Model
 	SmallModel           Model
 	SystemPromptPrefix   string
+	SystemPromptPrefixer SystemPromptPrefixer
+	WorkingDir           string
 	SystemPrompt         string
 	DisableAutoSummarize bool
 	IsYolo               bool
@@ -110,6 +120,8 @@ func NewSessionAgent(
 		largeModel:           opts.LargeModel,
 		smallModel:           opts.SmallModel,
 		systemPromptPrefix:   opts.SystemPromptPrefix,
+		systemPromptPrefixer: opts.SystemPromptPrefixer,
+		workingDir:           opts.WorkingDir,
 		systemPrompt:         opts.SystemPrompt,
 		sessions:             opts.Sessions,
 		messages:             opts.Messages,
@@ -239,7 +251,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				}
 			}
 
-			if promptPrefix := a.promptPrefix(); promptPrefix != "" {
+			if promptPrefix := a.promptPrefixForCall(callContext, call); promptPrefix != "" {
 				prepared.Messages = append([]fantasy.Message{fantasy.NewSystemMessage(promptPrefix)}, prepared.Messages...)
 			}
 
@@ -869,6 +881,25 @@ func (a *sessionAgent) promptPrefix() string {
 		return "You are Claude Code, Anthropic's official CLI for Claude."
 	}
 	return a.systemPromptPrefix
+}
+
+func (a *sessionAgent) promptPrefixForCall(ctx context.Context, call SessionAgentCall) string {
+	basePrefix := strings.TrimSpace(a.promptPrefix())
+	if a.systemPromptPrefixer == nil {
+		return basePrefix
+	}
+
+	final, err := a.systemPromptPrefixer.Prefix(ctx, basePrefix, call.SessionID, call.Prompt, a.workingDir, a.largeModel.ModelCfg.Model, a.largeModel.ModelCfg.Provider)
+	if err != nil {
+		slog.Debug("system prompt prefixer failed", "error", err)
+		return basePrefix
+	}
+
+	final = strings.TrimSpace(final)
+	if final == "" {
+		return basePrefix
+	}
+	return final
 }
 
 func (a *sessionAgent) isClaudeCode() bool {

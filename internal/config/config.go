@@ -217,6 +217,7 @@ func (Attribution) JSONSchemaExtend(schema *jsonschema.Schema) {
 
 type Options struct {
 	ContextPaths              []string     `json:"context_paths,omitempty" jsonschema:"description=Paths to files containing context information for the AI,example=.cursorrules,example=CRUSH.md"`
+	ACE                       *ACEOptions  `json:"ace,omitempty" jsonschema:"description=Agentic Context Engineering (ACE) memory injection options"`
 	TUI                       *TUIOptions  `json:"tui,omitempty" jsonschema:"description=Terminal user interface options"`
 	Debug                     bool         `json:"debug,omitempty" jsonschema:"description=Enable debug logging,default=false"`
 	DebugLSP                  bool         `json:"debug_lsp,omitempty" jsonschema:"description=Enable debug logging for LSP servers,default=false"`
@@ -227,6 +228,20 @@ type Options struct {
 	Attribution               *Attribution `json:"attribution,omitempty" jsonschema:"description=Attribution settings for generated content"`
 	DisableMetrics            bool         `json:"disable_metrics,omitempty" jsonschema:"description=Disable sending metrics,default=false"`
 	InitializeAs              string       `json:"initialize_as,omitempty" jsonschema:"description=Name of the context file to create/update during project initialization,default=AGENTS.md,example=AGENTS.md,example=CRUSH.md,example=CLAUDE.md,example=docs/LLMs.md"`
+}
+
+type ACEOptions struct {
+	Enabled bool `json:"enabled,omitempty" jsonschema:"description=Enable ACE memory injection,default=true"`
+	// Optional playbook path. If relative, it is resolved relative to `options.data_directory`.
+	PlaybookPath string `json:"playbook_path,omitempty" jsonschema:"description=Path to the ACE playbook file (relative to data_directory unless absolute),example=ace/playbook.json"`
+	// UpdateOnExit runs a session-end update when Crush exits.
+	UpdateOnExit bool `json:"update_on_exit,omitempty" jsonschema:"description=Update ACE playbook from the latest session when Crush exits,default=false"`
+	// MaxItems limits how many memories get injected.
+	MaxItems int `json:"max_items,omitempty" jsonschema:"description=Maximum number of memories to inject,minimum=0,maximum=50,default=6,example=6"`
+	// MinScore filters out low-value memories (based on the playbook entry score).
+	MinScore int `json:"min_score,omitempty" jsonschema:"description=Minimum key point score to consider for injection,default=0,example=0"`
+	// MaxChars limits the size of the injected memory block to avoid ballooning the prompt.
+	MaxChars int `json:"max_chars,omitempty" jsonschema:"description=Maximum characters allowed for injected memory block,minimum=0,maximum=20000,default=2000,example=2000"`
 }
 
 type MCPs map[string]MCPConfig

@@ -322,6 +322,17 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	if c.Options.ContextPaths == nil {
 		c.Options.ContextPaths = []string{}
 	}
+	if c.Options.ACE == nil {
+		c.Options.ACE = &ACEOptions{
+			Enabled: true,
+		}
+	}
+	if c.Options.ACE.MaxItems == 0 {
+		c.Options.ACE.MaxItems = 6
+	}
+	if c.Options.ACE.MaxChars == 0 {
+		c.Options.ACE.MaxChars = 2000
+	}
 	if dataDir != "" {
 		c.Options.DataDirectory = dataDir
 	} else if c.Options.DataDirectory == "" {
