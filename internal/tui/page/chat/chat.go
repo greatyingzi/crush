@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"charm.land/bubbles/v2/help"
@@ -267,6 +268,9 @@ func (p *chatPage) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		u, cmd := p.editor.Update(msg)
 		p.editor = u.(editor.Editor)
 		return p, cmd
+	case util.ACEContentMsg:
+		// Display ACE injected content in chat
+		return p, p.handleACEContent(msg)
 	case pubsub.Event[session.Session]:
 		u, cmd := p.header.Update(msg)
 		p.header = u.(header.Header)
@@ -1206,4 +1210,32 @@ func (p *chatPage) isMouseOverChat(x, y int) bool {
 
 	// Check if mouse coordinates are within chat bounds
 	return x >= chatX && x < chatX+chatWidth && y >= chatY && y < chatY+chatHeight
+}
+
+func (p *chatPage) handleACEContent(msg util.ACEContentMsg) tea.Cmd {
+	// Create a system message to show ACE content
+	var aceMsg string
+	prompt := strings.TrimSpace(msg.UserPrompt)
+	if len([]rune(prompt)) > 80 {
+		r := []rune(prompt)
+		prompt = string(r[:80]) + "…"
+	}
+	if msg.ACEPrefix == "" {
+		if prompt == "" {
+			aceMsg = "🧠 ACE: 未检测到相关上下文"
+		} else {
+			aceMsg = fmt.Sprintf("🧠 ACE (for: %s): 未检测到相关上下文", prompt)
+		}
+	} else {
+		// Render in a code block so angle-bracket tags and other prompt markup
+		// don't get interpreted (or dropped) by the markdown renderer.
+		if prompt == "" {
+			aceMsg = fmt.Sprintf("🧠 ACE注入的上下文:\n\n```text\n%s\n```", msg.ACEPrefix)
+		} else {
+			aceMsg = fmt.Sprintf("🧠 ACE (for: %s) 注入的上下文:\n\n```text\n%s\n```", prompt, msg.ACEPrefix)
+		}
+	}
+	
+	// Add this as a temporary message to transparency
+	return p.chat.AddSystemMessage(aceMsg)
 }

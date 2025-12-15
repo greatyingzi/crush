@@ -20,6 +20,7 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/exp/list"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
+	"github.com/google/uuid"
 )
 
 type SendMsg struct {
@@ -53,6 +54,7 @@ type MessageListCmp interface {
 	GoToBottom() tea.Cmd
 	GetSelectedText() string
 	CopySelectedText(bool) tea.Cmd
+	AddSystemMessage(content string) tea.Cmd
 }
 
 // messageListCmp implements MessageListCmp, providing a virtualized list
@@ -805,4 +807,22 @@ func abs(x int) int {
 		return -x
 	}
 	return x
+}
+
+// AddSystemMessage adds a temporary system message to the chat
+func (m *messageListCmp) AddSystemMessage(content string) tea.Cmd {
+	// Create a temporary system message with a special ID to identify it
+	msg := message.Message{
+		ID:        "ace-system-" + uuid.New().String(),
+		Role:      message.System,
+		CreatedAt: time.Now().Unix(),
+		Parts:     []message.ContentPart{message.TextContent{Text: content}},
+	}
+	
+	// Create a UI component for the message
+	uiMsg := messages.NewMessageCmp(msg)
+	
+	// In a backward list (newest at bottom), appending keeps this message visible
+	// near the most recent interaction.
+	return m.listCmp.AppendItem(uiMsg)
 }

@@ -128,7 +128,6 @@ func (o *Observer) runUpdate(ctx context.Context, sessionID, sessionTitle, reaso
 					"before_pending", beforePending,
 					"after_pending", countPending(pbAfter.KeyPoints),
 				)
-			}
 			return
 		}
 		// LLM update failed, try fallback
@@ -170,6 +169,8 @@ func (o *Observer) runUpdate(ctx context.Context, sessionID, sessionTitle, reaso
 			"before_pending", beforePending,
 			"after_pending", countPending(pbAfter.KeyPoints),
 		)
+	} else {
+		// No changes from summary fallback
 	}
 }
 

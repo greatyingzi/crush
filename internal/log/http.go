@@ -24,6 +24,8 @@ type HTTPRoundTripLogger struct {
 	Transport http.RoundTripper
 }
 
+const maxLoggedBodyBytes = 64 * 1024
+
 // RoundTrip implements http.RoundTripper interface with logging.
 func (h *HTTPRoundTripLogger) RoundTrip(req *http.Request) (*http.Response, error) {
 	var err error
@@ -44,7 +46,7 @@ func (h *HTTPRoundTripLogger) RoundTrip(req *http.Request) (*http.Response, erro
 			"HTTP Request",
 			"method", req.Method,
 			"url", req.URL,
-			"body", bodyToString(save),
+			"body", bodyToStringLimited(save, maxLoggedBodyBytes),
 		)
 	}
 
@@ -62,14 +64,29 @@ func (h *HTTPRoundTripLogger) RoundTrip(req *http.Request) (*http.Response, erro
 		return resp, err
 	}
 
-	save, resp.Body, err = drainBody(resp.Body)
 	if slog.Default().Enabled(req.Context(), slog.LevelDebug) {
+		// Do not drain streaming bodies; draining blocks until completion and
+		// defeats incremental streaming updates.
+		if isStreamingContentType(resp.Header.Get("Content-Type")) {
+			slog.Debug(
+				"HTTP Response",
+				"status_code", resp.StatusCode,
+				"status", resp.Status,
+				"headers", formatHeaders(resp.Header),
+				"body", "[streaming body omitted]",
+				"content_length", resp.ContentLength,
+				"duration_ms", duration.Milliseconds(),
+			)
+			return resp, nil
+		}
+
+		save, resp.Body, err = drainBody(resp.Body)
 		slog.Debug(
 			"HTTP Response",
 			"status_code", resp.StatusCode,
 			"status", resp.Status,
 			"headers", formatHeaders(resp.Header),
-			"body", bodyToString(save),
+			"body", bodyToStringLimited(save, maxLoggedBodyBytes),
 			"content_length", resp.ContentLength,
 			"duration_ms", duration.Milliseconds(),
 			"error", err,
@@ -78,19 +95,49 @@ func (h *HTTPRoundTripLogger) RoundTrip(req *http.Request) (*http.Response, erro
 	return resp, err
 }
 
-func bodyToString(body io.ReadCloser) string {
+func isStreamingContentType(ct string) bool {
+	ct = strings.ToLower(strings.TrimSpace(ct))
+	// Streaming protocols used by providers (SSE / NDJSON).
+	return strings.Contains(ct, "text/event-stream") ||
+		strings.Contains(ct, "application/x-ndjson")
+}
+
+func bodyToStringLimited(body io.ReadCloser, maxBytes int) string {
 	if body == nil {
 		return ""
 	}
-	src, err := io.ReadAll(body)
+	if maxBytes <= 0 {
+		maxBytes = maxLoggedBodyBytes
+	}
+	src, err := io.ReadAll(io.LimitReader(body, int64(maxBytes+1)))
 	if err != nil {
 		slog.Error("Failed to read body", "error", err)
 		return ""
 	}
+	truncated := len(src) > maxBytes
+	if truncated {
+		src = src[:maxBytes]
+	}
+
 	var b bytes.Buffer
-	if json.Indent(&b, bytes.TrimSpace(src), "", "  ") != nil {
+	trimmed := bytes.TrimSpace(src)
+	// Avoid indenting large payloads (expensive); only pretty-print small JSON.
+	if len(trimmed) <= 8*1024 && json.Indent(&b, trimmed, "", "  ") == nil {
+		if truncated {
+			return b.String() + "\n…[truncated]"
+		}
+		return b.String()
+	}
+
+	if json.Indent(&b, trimmed, "", "  ") != nil {
 		// not json probably
+		if truncated {
+			return string(src) + "\n…[truncated]"
+		}
 		return string(src)
+	}
+	if truncated {
+		return b.String() + "\n…[truncated]"
 	}
 	return b.String()
 }

@@ -56,6 +56,21 @@ func MouseEventFilter(m tea.Model, msg tea.Msg) tea.Msg {
 	return msg
 }
 
+type agentEventMsg struct {
+	msg tea.Msg
+	ok  bool
+}
+
+func waitForAgentEvent(ch <-chan tea.Msg) tea.Cmd {
+	if ch == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		msg, ok := <-ch
+		return agentEventMsg{msg: msg, ok: ok}
+	}
+}
+
 // appModel represents the main application model that manages pages, dialogs, and UI state.
 type appModel struct {
 	wWidth, wHeight int // Window dimensions
@@ -87,6 +102,10 @@ type appModel struct {
 	// QueryVersion instructs the TUI to query for the terminal version when it
 	// starts.
 	QueryVersion bool
+
+	// agentEvents receives ephemeral events from the agent/coordinator that are
+	// not persisted as app service events.
+	agentEvents <-chan tea.Msg
 }
 
 // Init initializes the application model and returns initial commands.
@@ -106,6 +125,7 @@ func (a appModel) Init() tea.Cmd {
 	if a.QueryVersion {
 		cmds = append(cmds, tea.RequestTerminalVersion)
 	}
+	cmds = append(cmds, waitForAgentEvent(a.agentEvents))
 
 	return tea.Batch(cmds...)
 }
@@ -117,6 +137,15 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	a.isConfigured = config.HasInitialDataConfig()
 
 	switch msg := msg.(type) {
+	case agentEventMsg:
+		if !msg.ok {
+			return a, nil
+		}
+		updated, cmd := a.Update(msg.msg)
+		if m, ok := updated.(*appModel); ok {
+			return m, tea.Batch(cmd, waitForAgentEvent(m.agentEvents))
+		}
+		return updated, tea.Batch(cmd, waitForAgentEvent(a.agentEvents))
 	case tea.EnvMsg:
 		// Is this Windows Terminal?
 		if !a.sendProgressBar {
@@ -236,8 +265,14 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Session
 	case cmpChat.SessionSelectedMsg:
+		if a.selectedSessionID != "" && a.selectedSessionID != msg.ID {
+			a.app.NotifySessionEnd(context.Background(), a.selectedSessionID, "switch")
+		}
 		a.selectedSessionID = msg.ID
 	case cmpChat.SessionClearedMsg:
+		if a.selectedSessionID != "" {
+			a.app.NotifySessionEnd(context.Background(), a.selectedSessionID, "clear")
+		}
 		a.selectedSessionID = ""
 	// Commands
 	case commands.SwitchSessionsMsg:
@@ -257,6 +292,7 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Compact
 	case commands.CompactMsg:
 		return a, func() tea.Msg {
+			a.app.NotifyPreCompact(context.Background(), msg.SessionID)
 			err := a.app.AgentCoordinator.Summarize(context.Background(), msg.SessionID)
 			if err != nil {
 				return util.ReportError(err)()
@@ -346,6 +382,16 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyPressMsg:
 		return a, a.handleKeyPressMsg(msg)
+
+	case util.ACEContentMsg:
+		// Forward ACE content to the current page
+		item, ok := a.pages[a.currentPage]
+		if !ok {
+			return a, nil
+		}
+		updated, pageCmd := item.Update(msg)
+		a.pages[a.currentPage] = updated
+		return a, tea.Batch(pageCmd)
 
 	case tea.MouseWheelMsg:
 		if a.dialog.HasDialogs() {
@@ -691,12 +737,17 @@ func New(app *app.App) *appModel {
 	keyMap := DefaultKeyMap()
 	keyMap.pageBindings = chatPage.Bindings()
 
+	// Create event channel for agent to communicate with TUI
+	eventChan := make(chan tea.Msg, 100)
+	app.SetEventChan(eventChan)
+
 	model := &appModel{
 		currentPage: chat.ChatPageID,
 		app:         app,
 		status:      status.NewStatusCmp(),
 		loadedPages: make(map[page.PageID]bool),
 		keyMap:      keyMap,
+		agentEvents: eventChan,
 
 		pages: map[page.PageID]util.Model{
 			chat.ChatPageID: chatPage,

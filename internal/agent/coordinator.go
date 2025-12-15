@@ -28,7 +28,9 @@ import (
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/tui/util"
 	"golang.org/x/sync/errgroup"
+	tea "charm.land/bubbletea/v2"
 
 	"charm.land/fantasy/providers/anthropic"
 	"charm.land/fantasy/providers/azure"
@@ -54,6 +56,7 @@ type Coordinator interface {
 	Summarize(context.Context, string) error
 	Model() Model
 	UpdateModels(ctx context.Context) error
+	SetEventChan(chan tea.Msg)
 }
 
 type coordinator struct {
@@ -71,6 +74,9 @@ type coordinator struct {
 	smallModel Model
 
 	readyWg errgroup.Group
+	
+	// Event channel to communicate with TUI
+	eventChan chan tea.Msg
 }
 
 func NewCoordinator(
@@ -90,6 +96,7 @@ func NewCoordinator(
 		history:     history,
 		lspClients:  lspClients,
 		agents:      make(map[string]SessionAgent),
+		eventChan:   make(chan tea.Msg, 100),
 	}
 
 	agentCfg, ok := cfg.Agents[config.AgentCoder]
@@ -110,6 +117,11 @@ func NewCoordinator(
 	c.currentAgent = agent
 	c.agents[config.AgentCoder] = agent
 	return c, nil
+}
+
+// SetEventChan implements Coordinator.
+func (c *coordinator) SetEventChan(ch chan tea.Msg) {
+	c.eventChan = ch
 }
 
 // Run implements Coordinator.
@@ -147,6 +159,15 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 			TopK:             topK,
 			FrequencyPenalty: freqPenalty,
 			PresencePenalty:  presPenalty,
+			ACECallback: func(sessionID, userPrompt, acePrefix string) {
+				if c.eventChan != nil {
+					c.eventChan <- util.ACEContentMsg{
+						SessionID: sessionID,
+						UserPrompt: userPrompt,
+						ACEPrefix: acePrefix,
+					}
+				}
+			},
 		})
 	}
 	result, originalErr := run()
@@ -321,7 +342,9 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		large,
 		small,
 		largeProviderCfg.SystemPromptPrefix,
-		ace.NewRuntime(c.cfg),
+		ace.NewRuntime(c.cfg).
+			WithSmallModel(small.Model).
+			WithMessageService(c.messages),
 		c.cfg.WorkingDir(),
 		systemPrompt,
 		c.cfg.Options.DisableAutoSummarize,

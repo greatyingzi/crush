@@ -128,10 +128,12 @@ func (m *messageCmp) View() string {
 		return m.style().PaddingLeft(1).Render(m.anim.View())
 	}
 	if m.message.ID != "" {
-		// this is a user or assistant message
+		// this is a user, system, or assistant message
 		switch m.message.Role {
 		case message.User:
 			return m.renderUserMessage()
+		case message.System:
+			return m.renderSystemMessage()
 		default:
 			return m.renderAssistantMessage()
 		}
@@ -166,6 +168,8 @@ func (msg *messageCmp) style() lipgloss.Style {
 	style := t.S().Text
 	if msg.message.Role == message.User {
 		style = style.PaddingLeft(1).BorderLeft(true).BorderStyle(borderStyle).BorderForeground(t.Primary)
+	} else if msg.message.Role == message.System {
+		style = style.PaddingLeft(1).BorderLeft(true).BorderStyle(lipgloss.ThickBorder()).BorderForeground(t.BlueDark)
 	} else {
 		if msg.focused {
 			style = style.PaddingLeft(1).BorderLeft(true).BorderStyle(borderStyle).BorderForeground(t.GreenDark)
@@ -248,6 +252,33 @@ func (m *messageCmp) renderUserMessage() string {
 
 	joined := lipgloss.JoinVertical(lipgloss.Left, parts...)
 	return m.style().Render(joined)
+}
+
+// renderSystemMessage renders system messages with a special style to distinguish them
+func (m *messageCmp) renderSystemMessage() string {
+	t := styles.CurrentTheme()
+	content := m.message.Content().String()
+	
+	// System message styling - make it visually distinct
+	systemStyle := t.S().Base.
+		Background(t.BgSubtle).
+		Foreground(t.FgMuted).
+		Padding(0, 1).
+		BorderLeft(true).
+		BorderStyle(lipgloss.ThickBorder()).
+		BorderForeground(t.BlueDark)
+	
+	// Add system icon
+	icon := t.S().Muted.Render("💻")
+	title := systemStyle.Render(fmt.Sprintf("%s System", icon))
+	
+	// Render the content with markdown
+	parts := []string{title, "", m.toMarkdown(content)}
+	joined := lipgloss.JoinVertical(lipgloss.Left, parts...)
+	
+	// Apply the container style with left padding to indent
+	containerStyle := t.S().Base.PaddingLeft(1)
+	return containerStyle.Render(joined)
 }
 
 // toMarkdown converts text content to rendered markdown using the configured renderer

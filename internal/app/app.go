@@ -124,7 +124,15 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 			model = app.AgentCoordinator.Model().Model
 		}
 	}
-	app.RegisterObserver(ace.NewObserver(cfg, sessions, messages, app.AgentCoordinator, model))
+	app.RegisterObserver(ace.NewObserver(func() *config.Config { 
+		// Reload config on each session
+		newCfg, err := config.Load(cfg.WorkingDir(), cfg.Options.DataDirectory, cfg.Options.Debug)
+		if err != nil {
+			slog.Debug("Failed to reload config for ACE", "error", err)
+			return cfg
+		}
+		return newCfg
+	}, sessions, messages, app.AgentCoordinator, model))
 	return app, nil
 }
 
@@ -349,6 +357,13 @@ func (app *App) InitCoderAgent(ctx context.Context) error {
 		return err
 	}
 	return nil
+}
+
+// SetEventChan sets the event channel for agent coordinator to communicate with TUI.
+func (app *App) SetEventChan(ch chan tea.Msg) {
+	if app.AgentCoordinator != nil {
+		app.AgentCoordinator.SetEventChan(ch)
+	}
 }
 
 // Subscribe sends events to the TUI as tea.Msgs.

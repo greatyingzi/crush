@@ -172,11 +172,10 @@ func mergeOrAddKeyPoint(pb *Playbook, candidate KeyPoint) bool {
 		return true
 	}
 
-	added := pb.Add(candidate.Text, candidate.Tags, candidate.Score)
+	pb.Add(candidate.Text, candidate.Tags, candidate.Score)
 	pb.KeyPoints[len(pb.KeyPoints)-1].EffectRating = candidate.EffectRating
 	pb.KeyPoints[len(pb.KeyPoints)-1].RiskLevel = candidate.RiskLevel
 	pb.KeyPoints[len(pb.KeyPoints)-1].InnovationLevel = candidate.InnovationLevel
-	_ = added
 	return true
 }
 

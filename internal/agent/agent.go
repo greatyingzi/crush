@@ -54,6 +54,7 @@ type SessionAgentCall struct {
 	TopK             *int64
 	FrequencyPenalty *float64
 	PresencePenalty  *float64
+	ACECallback      func(sessionID, userPrompt, acePrefix string)
 }
 
 type SessionAgent interface {
@@ -199,6 +200,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	defer cancel()
 	defer a.activeRequests.Del(call.SessionID)
 
+	// Compute the system prompt prefix once per user submission.
+	// PrepareStep can run multiple times (e.g. tool-use steps), and we don't want
+	// ACE to re-run (and re-emit UI events) on every provider request.
+	promptPrefixForCall := a.promptPrefixForCall(genCtx, call)
+
 	history, files := a.preparePrompt(msgs, call.Attachments...)
 
 	startTime := time.Now()
@@ -223,16 +229,6 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				prepared.Messages[i].ProviderOptions = nil
 			}
 
-			queuedCalls, _ := a.messageQueue.Get(call.SessionID)
-			a.messageQueue.Del(call.SessionID)
-			for _, queued := range queuedCalls {
-				userMessage, createErr := a.createUserMessage(callContext, queued)
-				if createErr != nil {
-					return callContext, prepared, createErr
-				}
-				prepared.Messages = append(prepared.Messages, userMessage.ToAIMessage()...)
-			}
-
 			prepared.Messages = a.workaroundProviderMediaLimitations(prepared.Messages)
 
 			lastSystemRoleInx := 0
@@ -251,8 +247,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				}
 			}
 
-			if promptPrefix := a.promptPrefixForCall(callContext, call); promptPrefix != "" {
-				prepared.Messages = append([]fantasy.Message{fantasy.NewSystemMessage(promptPrefix)}, prepared.Messages...)
+			if promptPrefixForCall != "" {
+				prepared.Messages = append([]fantasy.Message{fantasy.NewSystemMessage(promptPrefixForCall)}, prepared.Messages...)
 			}
 
 			var assistantMsg message.Message
@@ -899,6 +895,24 @@ func (a *sessionAgent) promptPrefixForCall(ctx context.Context, call SessionAgen
 	if final == "" {
 		return basePrefix
 	}
+
+	// Always call ACE callback if it exists, to provide transparency.
+	// Important: only surface the *injected delta* (ACE memory), not the entire
+	// base system prefix. This avoids confusing the UI and lets it reliably
+	// show "no injection" when the prefixer returns the base prefix unchanged.
+	if call.ACECallback != nil {
+		injected := ""
+		if strings.TrimSpace(final) != strings.TrimSpace(basePrefix) {
+			if bp := strings.TrimSpace(basePrefix); bp != "" && strings.HasPrefix(final, bp) {
+				injected = strings.TrimSpace(strings.TrimPrefix(final, bp))
+			} else {
+				// Fallback: if we can't derive a delta, show the full prefix we sent.
+				injected = final
+			}
+		}
+		call.ACECallback(call.SessionID, call.Prompt, injected)
+	}
+	
 	return final
 }
 

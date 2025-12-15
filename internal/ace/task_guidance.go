@@ -16,27 +16,7 @@ func NewTaskGuidanceAnalyzer(temperature float64) *TaskGuidanceAnalyzer {
 	return &TaskGuidanceAnalyzer{temperature: temperature}
 }
 
-// AnalyzeTask performs comprehensive task analysis based on conversation and prompt
-func (t *TaskGuidanceAnalyzer) AnalyzeTask(conversation []ConversationTurn, prompt string, existingTags []string) (TaskGuidanceResponse, error) {
-	// Part 1: Context continuity analysis
-	contextAnalysis := t.analyzeContextContinuity(conversation, prompt)
-	
-	// Part 2: Tag generation
-	tags := t.generateTags(prompt, existingTags)
-	
-	// Part 3: Injection settings (temperature)
-	injectionSettings := t.determineInjectionSettings(prompt)
-	
-	// Part 4: Task guidance
-	guidance := t.generateTaskGuidance(contextAnalysis.TaskRelevance, prompt)
-	
-	return TaskGuidanceResponse{
-		ContextAnalysis:   contextAnalysis,
-		Tags:             tags,
-		InjectionSettings: injectionSettings,
-		TaskGuidance:      guidance,
-	}, nil
-}
+
 
 type ConversationTurn struct {
 	Role    string `json:"role"`
@@ -129,7 +109,7 @@ func (t *TaskGuidanceAnalyzer) generateTags(prompt string, existingTags []string
 	// Add new tags if we have fewer than 5
 	if len(finalTags) < 5 {
 		for _, token := range promptTokens {
-			if len(token) < 3 || t.isStopWord(token) {
+			if len(token) < 3 || isStopWord(token) {
 				continue
 			}
 			
@@ -214,16 +194,7 @@ func (t *TaskGuidanceAnalyzer) semanticSimilarity(a, b string) float64 {
 	return float64(intersection) / float64(union)
 }
 
-func (t *TaskGuidanceAnalyzer) isStopWord(token string) bool {
-	stopWords := []string{
-		"a", "an", "and", "are", "as", "at", "be", "but", "by",
-		"for", "from", "how", "i", "if", "in", "is", "it", "of", "on",
-		"or", "please", "the", "this", "to", "use", "we", "what", "when",
-		"with", "you", "your",
-	}
-	
-	return slices.Contains(stopWords, strings.ToLower(token))
-}
+
 
 func (t *TaskGuidanceAnalyzer) determineInjectionSettings(prompt string) InjectionSettings {
 	// Determine optimal temperature based on task characteristics
@@ -328,7 +299,8 @@ func GenerateTaskGuidancePrompt(conversation []ConversationTurn, prompt string, 
 	// Convert existing tags to JSON
 	existingTagsJSON, _ := json.Marshal(existingTags)
 	
-	// Use the template from task_guidance.txt
+	// Use a placeholder-based template (not fmt.Sprintf) so literal '%' in the
+	// prompt text doesn't trigger formatting expansion.
 	template := `# Task Guidance Template
 
 Analyze user's request to: 1) assess context continuity with current engineering work, 2) derive concise tags, 3) generate structured thinking guidance, and 4) assess task characteristics for optimal knowledge injection.
@@ -337,14 +309,14 @@ Analyze user's request to: 1) assess context continuity with current engineering
 **CRITICAL**: Your primary responsibility is maintaining engineering workflow continuity. While being responsive to all requests, you must proactively detect and manage context shifts that could fragment attention or derail ongoing work. Balance responsiveness with focus protection through intelligent guidance.
 
 # Conversation (recent messages)
-%s
+{{conversation}}
 
 # Pending Prompt (highest priority)
-%s
+{{prompt}}
 
 # Part 1: Tag Generation
 ## Existing Playbook Tags for Reference
-%s
+{{existing_tags}}
 
 ## Tag Generation Rules
 - Limit final_tags to 3-5 most relevant tags
@@ -473,6 +445,10 @@ You are about to receive a user request. Before responding, you need to:
 }
 
 Always respond with valid JSON only.`
-	
-	return fmt.Sprintf(template, string(conversationJSON), prompt, string(existingTagsJSON))
+
+	return strings.NewReplacer(
+		"{{conversation}}", string(conversationJSON),
+		"{{prompt}}", prompt,
+		"{{existing_tags}}", string(existingTagsJSON),
+	).Replace(template)
 }

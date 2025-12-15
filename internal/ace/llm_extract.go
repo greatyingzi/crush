@@ -108,8 +108,9 @@ func UpdateFromSessionMessages(
 	}
 	pb.Normalize()
 
-	_ = sessionTitle // intentionally unused; original ACE doesn't include title in reflection prompt
-	prompt, conv := buildReflectionPrompt(msgs, pb)
+	// sessionTitle is intentionally unused as original ACE doesn't include title in reflection prompt
+	_ = sessionTitle
+	prompt, _ := buildReflectionPrompt(msgs, pb)
 	respText, err := gen.Generate(ctx, prompt)
 	if err != nil {
 		return false, err
@@ -120,7 +121,6 @@ func UpdateFromSessionMessages(
 		return false, fmt.Errorf("parse LLM extraction: %w", err)
 	}
 	if extraction.Empty() {
-		_ = conv
 		return false, nil
 	}
 
@@ -198,7 +198,7 @@ func parseReflectionResponse(respText string) (ReflectionExtraction, error) {
 		return ReflectionExtraction{}, errors.New("empty response")
 	}
 
-	jsonText := extractJSONBlock(respText)
+	jsonText := ExtractJSONBlock(respText)
 	var r llmExtractionResponse
 	if err := json.Unmarshal([]byte(jsonText), &r); err != nil {
 		return ReflectionExtraction{}, err
@@ -215,30 +215,6 @@ func parseReflectionResponse(respText string) (ReflectionExtraction, error) {
 	}, nil
 }
 
-func extractJSONBlock(s string) string {
-	// Prefer fenced ```json blocks.
-	if idx := strings.Index(s, "```json"); idx >= 0 {
-		start := idx + len("```json")
-		if end := strings.Index(s[start:], "```"); end >= 0 {
-			return strings.TrimSpace(s[start : start+end])
-		}
-	}
-	// Fallback to any fenced ``` block.
-	if idx := strings.Index(s, "```"); idx >= 0 {
-		start := idx + len("```")
-		if end := strings.Index(s[start:], "```"); end >= 0 {
-			return strings.TrimSpace(s[start : start+end])
-		}
-	}
-
-	// Otherwise, try to locate the first '{' and last '}'.
-	first := strings.Index(s, "{")
-	last := strings.LastIndex(s, "}")
-	if first >= 0 && last > first {
-		return strings.TrimSpace(s[first : last+1])
-	}
-	return strings.TrimSpace(s)
-}
 
 func playbooksSemanticallyEqual(a, b Playbook) bool {
 	if len(a.KeyPoints) != len(b.KeyPoints) {

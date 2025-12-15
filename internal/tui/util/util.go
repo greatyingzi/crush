@@ -62,4 +62,9 @@ type (
 		TTL  time.Duration
 	}
 	ClearStatusMsg struct{}
+	ACEContentMsg struct {
+		SessionID string
+		UserPrompt string
+		ACEPrefix string
+	}
 )
