@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"strings"
 
+	"github.com/charmbracelet/crush/internal/event"
 	"github.com/spf13/cobra"
 )
 
@@ -58,12 +59,13 @@ crush run --quiet "Generate a README for this project"
 			return fmt.Errorf("no prompt provided")
 		}
 
-		// TODO: Make this work when redirected to something other than stdout.
-		// For example:
-		//     crush run "Do something fancy" > output.txt
-		//     echo "Do something fancy" | crush run > output.txt
-		//
+		event.SetInteractive(true)
+		event.AppInitialized()
+
 		return app.RunNonInteractive(ctx, os.Stdout, prompt, quiet)
+	},
+	PostRun: func(cmd *cobra.Command, args []string) {
+		event.AppExited()
 	},
 }
 
